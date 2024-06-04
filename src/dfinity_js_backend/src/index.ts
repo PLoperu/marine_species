@@ -27,7 +27,6 @@ const MarineSpecie = Record({
     updated_at: text,
 });
 
-
 const TaxonomyPayload = Record({
     kingdom: text,
     phylum: text,
@@ -50,12 +49,16 @@ const Message = Variant({
     PaymentCompleted: text
 });
 
-
 const taxonomyStorage = StableBTreeMap(0, text, Taxonomy);
 const marineSpecieStorage = StableBTreeMap(1, text, MarineSpecie);
+const orderStorage = StableBTreeMap(2, text, Record({
+    id: text,
+    status: text,
+    created_at: text,
+    updated_at: text,
+}));
 
 const icpCanister = Ledger(Principal.fromText("ryjl3-tyaaa-aaaaa-aaaba-cai"));
-
 
 export default Canister({
     getTaxonomies: query([], Vec(Taxonomy), () => {
@@ -72,14 +75,13 @@ export default Canister({
 
     addTaxonomy: update([TaxonomyPayload], Result(Taxonomy, Message), (payload) => {
         if (typeof payload !== "object" || Object.keys(payload).length === 0) {
-            return Err({ InvalidPayload: "invalid payoad" })
+            return Err({ InvalidPayload: "invalid payload" })
         }
         const taxonomy = { id: uuidv4(), ...payload, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         taxonomyStorage.insert(taxonomy.id, taxonomy);
         return Ok(taxonomy);
     }),
 
-    // Update using taxonomy id and TaxonomyPayload of the taxonomy
     updateTaxonomy: update([text, TaxonomyPayload], Result(Taxonomy, Message), (id, payload) => {
         const taxonomyOpt = taxonomyStorage.get(id);
         if ("None" in taxonomyOpt) {
@@ -112,7 +114,7 @@ export default Canister({
 
     addMarineSpecie: update([text, MarineSpeciePayload], Result(MarineSpecie, Message), (taxonomyId, payload) => {
         if (typeof payload !== "object" || Object.keys(payload).length === 0) {
-            return Err({ InvalidPayload: "invalid payoad" })
+            return Err({ InvalidPayload: "invalid payload" })
         }
         const taxonomyOpt = taxonomyStorage.get(taxonomyId);
         if ("None" in taxonomyOpt) {
@@ -121,9 +123,8 @@ export default Canister({
         const marineSpecie = { id: uuidv4(), taxonomy: taxonomyOpt.Some, ...payload, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         marineSpecieStorage.insert(marineSpecie.id, marineSpecie);
         return Ok(marineSpecie);
-    }
-    ),
-    // Update using specie id and MarineSpeciepayload of the specie
+    }),
+
     updateMarineSpecie: update([text, MarineSpeciePayload], Result(MarineSpecie, Message), (id, payload) => {
         const marineSpecieOpt = marineSpecieStorage.get(id);
         if ("None" in marineSpecieOpt) {
@@ -132,7 +133,6 @@ export default Canister({
         marineSpecieStorage.insert(marineSpecieOpt.Some.id, { ...marineSpecieOpt.Some, ...payload, updated_at: new Date().toISOString() });
         return Ok(marineSpecieOpt.Some);
     }),
-    
 
     deleteMarineSpecie: update([text], Result(MarineSpecie, Message), (id) => {
         const deletedMarineSpecieOpt = marineSpecieStorage.get(id);
@@ -157,7 +157,7 @@ export default Canister({
         marineSpecieOpt.Some.taxonomy = taxonomyOpt.Some;
         marineSpecieStorage.insert(marineSpecieId, marineSpecieOpt.Some);
         return Ok(marineSpecieOpt.Some);
-    } ),
+    }),
 
     addTaxonomyToMarineSpecie: update([text, text], Result(MarineSpecie, Message), (marineSpecieId, taxonomyId) => {
         const marineSpecieOpt = marineSpecieStorage.get(marineSpecieId);
@@ -175,31 +175,61 @@ export default Canister({
         return Ok(marineSpecieOpt.Some);
     }),
 
-    // Sort Marine Species by Taxonomy Kingdom Ascending
     sortMarineSpeciesByTaxonomyKingdom: query([], Vec(MarineSpecie), () => {
         const marineSpecies = marineSpecieStorage.values();
         return marineSpecies.sort((a, b) => a.taxonomy.kingdom.localeCompare(b.taxonomy.kingdom));
     }),
 
-    // Sort Marine Species by Taxonomy Kingdom Descending
     sortMarineSpeciesByTaxonomyKingdomDesc: query([], Vec(MarineSpecie), () => {
         const marineSpecies = marineSpecieStorage.values();
         return marineSpecies.sort((a, b) => b.taxonomy.kingdom.localeCompare(a.taxonomy.kingdom));
     }),
 
-    // Search Marine Species by Taxonomy Kingdom or Phylum
     searchMarineSpeciesByTaxonomyKingdomOrPhylum: query([text], Vec(MarineSpecie), (searchText) => {
         const marineSpecies = marineSpecieStorage.values();
         return marineSpecies.filter((marineSpecie) => marineSpecie.taxonomy.kingdom.toLowerCase() === searchText.toLowerCase() || marineSpecie.taxonomy.phylum.toLowerCase() === searchText.toLowerCase());
     }),
 
-    // Arrange Marine Species by Time of Creation Ascending
     sortMarineSpeciesByTimeOfCreation: query([], Vec(MarineSpecie), () => {
         const marineSpecies = marineSpecieStorage.values();
         return marineSpecies.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }),
 
+    makePayment: update([text], Result(text, Message), (orderId) => {
+        const orderOpt = orderStorage.get(orderId);
+        if ("None" in orderOpt) {
+            return Err({ NotFound: `order with id=${orderId} not found` });
+        }
 
+        // Simulate payment process with a random result
+        const paymentSucceeded = Math.random() < 0.5;
+        if (paymentSucceeded) {
+            orderStorage.insert(orderOpt.Some.id, { ...orderOpt.Some, status: "Paid", updated_at: new Date().toISOString() });
+            return Ok(`Payment for order ${orderId} completed successfully.`);
+        } else {
+            return Err({ PaymentFailed: `Payment for order ${orderId} failed. Please try again later.` });
+        }
+    }),
+
+    completePayment: update([text], Result(text, Message), (orderId) => {
+        const orderOpt = orderStorage.get(orderId);
+        if ("None" in orderOpt) {
+            return Err({ NotFound: `order with id=${orderId} not found` });
+        }
+
+        orderStorage.insert(orderOpt.Some.id, { ...orderOpt.Some, status: "Completed", updated_at: new Date().toISOString() });
+        return Ok(`Order ${orderId} has been successfully completed.`);
+    }),
+
+    cancelOrder: update([text], Result(text, Message), (orderId) => {
+        const orderOpt = orderStorage.get(orderId);
+        if ("None" in orderOpt) {
+            return Err({ NotFound: `order with id=${orderId} not found` });
+        }
+
+        orderStorage.insert(orderOpt.Some.id, { ...orderOpt.Some, status: "Cancelled", updated_at: new Date().toISOString() });
+        return Ok(`Order ${orderId} has been cancelled.`);
+    }),
 
 });
 
@@ -226,6 +256,3 @@ globalThis.crypto = {
         return array;
     }
 };
-
-
-
